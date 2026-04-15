@@ -620,7 +620,9 @@ function isValidToken() {
   const urlToken = getTokenFromURL();
   if (!urlToken || !state.currentToken) return false;
   const tokenPickIndex = parseInt(urlToken.split('-')[0]);
-  return urlToken === state.currentToken && tokenPickIndex === state.currentPickIndex;
+  const valid = urlToken === state.currentToken && tokenPickIndex === state.currentPickIndex;
+  console.log(`🔑 Token check: url="${urlToken.slice(0,20)}…" stored="${(state.currentToken||'').slice(0,20)}…" pickIdx=${state.currentPickIndex} → ${valid?'✓ VALID':'✗ INVALID'}`);
+  return valid;
 }
 function isReadOnly() {
   const urlToken = getTokenFromURL();
@@ -1386,6 +1388,15 @@ function showToast(msg,type='success',icon='✓') {
 // ── INIT ──
 window.onload = async function() {
   initEmailJS();
+
+  const urlToken = getTokenFromURL();
+
+  // If someone arrived via a magic link, show a loading message while Firebase loads
+  if (urlToken) {
+    document.getElementById('readOnlyNotice').classList.remove('hidden');
+    document.getElementById('readOnlyNotice').innerHTML = '⏳ Loading your draft session…';
+  }
+
   buildSetupUI();
 
   // Check Firebase for existing draft state
@@ -1393,14 +1404,22 @@ window.onload = async function() {
   const data = snapshot.val();
 
   if (data && data.launched) {
-    // Draft already exists — restore it and hide setup
     deserializeState(data);
     document.getElementById('setupOverlay').classList.add('hidden');
     renderAll();
-    // If this person has a valid token, welcome them
-    if (!isReadOnly() && !isDraftDone()) {
-      const p = state.participants[participantAtIndex(state.currentPickIndex)];
-      showToast(`Welcome, ${p.name.split(' ')[0]}! It's your turn to pick. 🏝`, 'success', '🏝');
+
+    if (urlToken) {
+      if (!isReadOnly() && !isDraftDone()) {
+        const p = state.participants[participantAtIndex(state.currentPickIndex)];
+        showToast(`Welcome, ${p.name.split(' ')[0]}! It's your turn to pick. 🏝`, 'success', '🏝');
+      } else if (isReadOnly() && !isDraftDone()) {
+        // Token is present but doesn't match — could be stale link
+        const p = state.participants[participantAtIndex(state.currentPickIndex)];
+        document.getElementById('readOnlyNotice').classList.remove('hidden');
+        document.getElementById('readOnlyNotice').innerHTML =
+          `⚠️ <strong>This link has expired.</strong> It is currently <strong>${p.name}'s</strong> turn. If that's you, check your email for your updated pick link.`;
+        console.warn(`Token mismatch. URL token: ${urlToken}, stored: ${state.currentToken}, pickIdx: ${state.currentPickIndex}`);
+      }
     }
   }
 
