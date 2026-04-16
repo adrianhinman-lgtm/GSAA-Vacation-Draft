@@ -611,7 +611,7 @@ function generateToken() {
   return `${state.currentPickIndex}-${rand}`;
 }
 function buildMagicLink(token) {
-  return `${BASE_URL}?token=${encodeURIComponent(token)}`;
+  return `${BASE_URL}?token=${token}`;
 }
 function getTokenFromURL() {
   return new URLSearchParams(window.location.search).get('token');
@@ -1182,7 +1182,7 @@ async function manualSkip() {
 }
 
 // ── EMAIL (EmailJS) ──
-const EMAILJS_SERVICE    = 'service_mg9q6dy';
+const EMAILJS_SERVICE    = 'service_fms39xx';
 const EMAILJS_TEMPLATE   = 'template_3san8bo';   // turn notifications, reminders, launch
 const EMAILJS_COMPLETE   = 'template_px9tlfa';   // completion report (dedicated template)
 const EMAILJS_KEY        = '5B7wHSc5-NxrU7Odr';
@@ -1212,7 +1212,7 @@ function sendLaunchEmail(firstPerson) {
     .catch(err=>{showToast(`⚠️ Launch email failed — ${err.text||'check console'}`,'info','⚠️');console.error(err);});
 }
 
-function sendEmail(actor,slot,nextPerson,context='pick') {
+function sendEmail(actor, slot, nextPerson, context='pick') {
   if(!nextPerson||!nextPerson.email)return;
   if(typeof emailjs==='undefined'){console.warn('EmailJS not available');return;}
   const round=roundNumber(state.currentPickIndex);
@@ -1224,6 +1224,8 @@ function sendEmail(actor,slot,nextPerson,context='pick') {
   const closed_slots=closedSlots.length>0?closedSlots.map(s=>`• ${s.label} (${fmt(s.start)} – ${fmt(s.end)}) — FULL`).join('\n'):'None — all dates still have availability.';
   const openSlots=state.slots.filter(s=>s.claims.length<s.max);
   const open_slots_summary=openSlots.length>0?openSlots.map(s=>{const rem=s.max-s.claims.length;return`• ${s.label} (${fmt(s.start)} – ${fmt(s.end)}) — ${rem} spot${rem!==1?'s':''} left`;}).join('\n'):'No dates remaining — draft is complete!';
+
+  // Email to next drafter
   const templateParams={
     to_name:nextPerson.name, to_first_name:nextPerson.name.split(' ')[0],
     to_email:nextPerson.email, from_name:'Vacation Draft', actor_name:actor.name,
@@ -1234,11 +1236,43 @@ function sendEmail(actor,slot,nextPerson,context='pick') {
     closed_slots, open_slots_summary, round_num:round, pick_num:state.totalPicks,
     context:isPick?'pick':'skip',
     draft_link:buildMagicLink(state.currentToken),
-    reply_to:actor.email||'no-reply@vacationdraft.com',
+    reply_to:actor.email||ADMIN_EMAIL,
   };
   emailjs.send(EMAILJS_SERVICE,EMAILJS_TEMPLATE,templateParams)
     .then(()=>{const msg=isPick?`📧 Email sent to ${nextPerson.name.split(' ')[0]}`:`📧 Skip notice sent to ${nextPerson.name.split(' ')[0]}`;showToast(msg,'success','📧');})
     .catch(err=>{showToast(`⚠️ Email failed — ${err.text||'check console'}`,'info','⚠️');console.error('EmailJS error:',err);});
+
+  // Admin notification — only send if admin is not the one picking or being notified
+  const adminIsActor = actor.email === ADMIN_EMAIL;
+  const adminIsNext = nextPerson.email === ADMIN_EMAIL;
+  if (!adminIsActor && !adminIsNext) {
+    setTimeout(() => {
+      const adminParams = {
+        to_name:        ADMIN_NAME,
+        to_first_name:  ADMIN_NAME,
+        to_email:       ADMIN_EMAIL,
+        from_name:      'Vacation Draft',
+        actor_name:     actor.name,
+        action_summary: isPick
+          ? `${actor.name} selected ${slot.label} (${fmt(slot.start)} – ${fmt(slot.end)}). Next up: ${nextPerson.name}.`
+          : `${actor.name} skipped their turn. Next up: ${nextPerson.name}.`,
+        slot_label:     isPick ? slot.label : '—',
+        slot_dates:     isPick ? `${fmt(slot.start)} – ${fmt(slot.end)}` : '—',
+        slot_days:      isPick ? `${slot.days} day${slot.days!==1?'s':''}` : '—',
+        spots_left:     isPick ? (slot.max - slot.claims.length) : '—',
+        closed_slots,
+        open_slots_summary,
+        round_num:      round,
+        pick_num:       state.totalPicks,
+        context:        'admin-pick',
+        draft_link:     BASE_URL,
+        reply_to:       ADMIN_EMAIL,
+      };
+      emailjs.send(EMAILJS_SERVICE, EMAILJS_TEMPLATE, adminParams)
+        .then(() => console.log(`✅ Admin notified of pick by ${actor.name}`))
+        .catch(err => console.error('Admin pick notification error:', err));
+    }, 800); // slight delay so it doesn't race with the drafter email
+  }
 }
 
 // ── REMINDER EMAIL (24h no-pick) ──
